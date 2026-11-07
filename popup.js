@@ -1,5 +1,6 @@
 const subfolderInput = document.getElementById("subfolderInput");
 const folderPreview = document.getElementById("folderPreview");
+const concurrencySelect = document.getElementById("concurrencySelect");
 const urlsInput = document.getElementById("urlsInput");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
@@ -46,9 +47,10 @@ function renderState(state) {
   progressFill.style.width = `${pct}%`;
 
   if (state.isRunning) {
+    const tabsCount = state.concurrency || 1;
     statusText.textContent = state.cancelRequested
       ? "Stopping..."
-      : "Opening & saving one at a time...";
+      : `Working with ${tabsCount} tab(s) at once...`;
     startBtn.disabled = true;
     stopBtn.style.display = "inline-block";
     stopBtn.disabled = Boolean(state.cancelRequested);
@@ -72,11 +74,14 @@ function renderState(state) {
 
 // Load saved drafts and live state on popup open
 chrome.storage.local.get(
-  ["cleanReadSubfolder", "cleanReadUrlsDraft", "cleanReadJobState"],
+  ["cleanReadSubfolder", "cleanReadConcurrency", "cleanReadUrlsDraft", "cleanReadJobState"],
   (res) => {
     if (res.cleanReadSubfolder) {
       subfolderInput.value = res.cleanReadSubfolder;
       folderPreview.textContent = res.cleanReadSubfolder;
+    }
+    if (res.cleanReadConcurrency) {
+      concurrencySelect.value = res.cleanReadConcurrency;
     }
     if (res.cleanReadUrlsDraft) {
       urlsInput.value = res.cleanReadUrlsDraft;
@@ -105,6 +110,10 @@ subfolderInput.addEventListener("input", () => {
   chrome.storage.local.set({ cleanReadSubfolder: val });
 });
 
+concurrencySelect.addEventListener("change", () => {
+  chrome.storage.local.set({ cleanReadConcurrency: concurrencySelect.value });
+});
+
 urlsInput.addEventListener("input", () => {
   chrome.storage.local.set({ cleanReadUrlsDraft: urlsInput.value });
 });
@@ -117,13 +126,15 @@ startBtn.addEventListener("click", () => {
   }
 
   const subfolder = subfolderInput.value.trim() || "CleanRead";
-  chrome.storage.local.set({ cleanReadSubfolder: subfolder });
+  const concurrency = parseInt(concurrencySelect.value, 10) || 3;
+  chrome.storage.local.set({ cleanReadSubfolder: subfolder, cleanReadConcurrency: String(concurrency) });
 
   chrome.runtime.sendMessage(
     {
       type: "START_BATCH",
       urls,
-      subfolder
+      subfolder,
+      concurrency
     },
     (res) => {
       if (res && res.state) {

@@ -233,10 +233,10 @@ function simulateHumanActivity(durationMs) {
   });
 }
 
-async function processSingleUrl(url, index, total, subfolder) {
+async function processSingleUrl(url, subfolder, isSingleWorker = false) {
   let tabId = null;
   try {
-    const tab = await chrome.tabs.create({ url, active: true });
+    const tab = await chrome.tabs.create({ url, active: isSingleWorker });
     tabId = tab.id;
 
     // Wait for initial page complete
@@ -310,7 +310,8 @@ async function processSingleUrl(url, index, total, subfolder) {
   }
 }
 
-async function runBatchQueue(urls, subfolder) {
+async function runBatchQueue(urls, subfolder, concurrency = 3) {
+  const maxWorkers = Math.max(1, Math.min(Number(concurrency) || 3, 5));
   jobState = {
     isRunning: true,
     cancelRequested: false,
@@ -319,38 +320,47 @@ async function runBatchQueue(urls, subfolder) {
     completed: 0,
     failed: 0,
     currentUrl: "",
+    concurrency: maxWorkers,
     logs: []
   };
-  addLog(`Starting batch of ${urls.length} URL(s) -> Downloads/${jobState.subfolder}/`);
+  addLog(
+    `Starting batch of ${urls.length} URL(s) with ${maxWorkers} tab worker(s) -> Downloads/${jobState.subfolder}/`
+  );
 
-  for (let i = 0; i < urls.length; i++) {
-    if (jobState.cancelRequested) {
-      addLog("Batch stopped by user.", "warn");
-      break;
-    }
+  let nextIndex = 0;
 
-    const rawUrl = urls[i];
-    jobState.currentUrl = rawUrl;
-    broadcastState();
-    addLog(`[${i + 1}/${urls.length}] Opening ${rawUrl}`);
+  async function worker(workerId) {
+    while (!jobState.cancelRequested) {
+      if (nextIndex >= urls.length) break;
+      const i = nextIndex++;
+      const rawUrl = urls[i];
 
-    try {
-      await processSingleUrl(rawUrl, i + 1, urls.length, jobState.subfolder);
-      jobState.completed++;
-    } catch (err) {
-      jobState.failed++;
-      addLog(
-        `Error on ${rawUrl}: ${err && err.message ? err.message : String(err)}`,
-        "error"
-      );
-    }
+      jobState.currentUrl = rawUrl;
+      addLog(`[Worker ${workerId}] Opening (${i + 1}/${urls.length}): ${rawUrl}`);
+      broadcastState();
 
-    broadcastState();
-    // Brief pause between tabs
-    if (i < urls.length - 1 && !jobState.cancelRequested) {
-      await sleep(500);
+      try {
+        await processSingleUrl(rawUrl, jobState.subfolder, maxWorkers === 1);
+        jobState.completed++;
+        addLog(`[Worker ${workerId}] Completed (${i + 1}/${urls.length})`, "success");
+      } catch (err) {
+        jobState.failed++;
+        addLog(
+          `[Worker ${workerId}] Error on ${rawUrl}: ${err && err.message ? err.message : String(err)}`,
+          "error"
+        );
+      }
+      broadcastState();
+      await sleep(300);
     }
   }
+
+  const workerPromises = [];
+  const actualWorkers = Math.min(maxWorkers, urls.length);
+  for (let w = 1; w <= actualWorkers; w++) {
+    workerPromises.push(worker(w));
+  }
+  await Promise.all(workerPromises);
 
   jobState.isRunning = false;
   jobState.currentUrl = "";
@@ -376,7 +386,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     const urls = Array.isArray(message.urls) ? message.urls : [];
     const subfolder = message.subfolder || "CleanRead";
-    runBatchQueue(urls, subfolder);
+    const concurrency = parseInt(message.concurrency, 10) || 3;
+    runBatchQueue(urls, subfolder, concurrency);
     sendResponse({ ok: true, state: jobState });
     return true;
   }
@@ -384,7 +395,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "STOP_BATCH") {
     if (jobState.isRunning) {
       jobState.cancelRequested = true;
-      addLog("Stopping after current URL finishes...", "warn");
+      addLog("Stopping after current URLs finish...", "warn");
     }
     sendResponse({ ok: true, state: jobState });
     return true;
