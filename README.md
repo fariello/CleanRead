@@ -4,7 +4,9 @@ A lightweight MS Edge / Google Chrome extension (Manifest V3) that takes a paste
 
 ## Output Format
 
-Each page is saved to `Downloads/<Subfolder>/` (default `Downloads/CleanRead/`) as a numbered `.md` file:
+Each page is saved to `Downloads/<Subfolder>/` (default `Downloads/CleanRead/`) as a pair of numbered files:
+- `<prefix>-<title>.md` — Clean, text-only Markdown with frontmatter for screen readers.
+- `<prefix>-<title>.html` — The full rendered page HTML after dynamic scripts and Cloudflare checks complete.
 
 ```markdown
 ---

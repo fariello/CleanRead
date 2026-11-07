@@ -441,14 +441,16 @@
     return {
       ok: true,
       title: title || "untitled",
-      markdownBody: markdownBody || ""
+      markdownBody: markdownBody || "",
+      rawHtml: "<!DOCTYPE html>\n" + (document.documentElement ? document.documentElement.outerHTML : "")
     };
   } catch (err) {
     return {
       ok: false,
       error: String(err && err.message ? err.message : err),
       title: document.title || "untitled",
-      markdownBody: document.body ? (document.body.innerText || "").trim() : ""
+      markdownBody: document.body ? (document.body.innerText || "").trim() : "",
+      rawHtml: "<!DOCTYPE html>\n" + (document.documentElement ? document.documentElement.outerHTML : "")
     };
   }
 })();

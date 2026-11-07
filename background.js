@@ -96,7 +96,7 @@ function sanitizeSubfolder(folder) {
   return cleaned || "CleanRead";
 }
 
-function buildFilename(subfolder, index, total, title, url) {
+function buildFilenames(subfolder, index, total, title, url) {
   const padWidth = Math.max(2, String(total).length);
   const prefix = String(index).padStart(padWidth, "0");
 
@@ -118,13 +118,17 @@ function buildFilename(subfolder, index, total, title, url) {
     .slice(0, 70) || "article";
 
   const folder = sanitizeSubfolder(subfolder);
-  return `${folder}/${prefix}-${slug}.md`;
+  const basePath = `${folder}/${prefix}-${slug}`;
+  return {
+    md: `${basePath}.md`,
+    html: `${basePath}.html`
+  };
 }
 
-function downloadMarkdownFile(markdownText, filename) {
+function downloadFile(content, filename, mimeType = "text/plain") {
   return new Promise((resolve, reject) => {
     const dataUrl =
-      "data:text/markdown;charset=utf-8," + encodeURIComponent(markdownText);
+      `data:${mimeType};charset=utf-8,` + encodeURIComponent(content);
 
     chrome.downloads.download(
       {
@@ -280,10 +284,13 @@ async function processSingleUrl(url, index, total, subfolder) {
     ].join("\n");
 
     const finalMarkdown = `${frontmatter}\n${payload.markdownBody.trim()}\n`;
-    const filename = buildFilename(subfolder, index, total, payload.title, url);
+    const filenames = buildFilenames(subfolder, index, total, payload.title, url);
 
-    await downloadMarkdownFile(finalMarkdown, filename);
-    addLog(`Saved: ${filename}`, "success");
+    await downloadFile(finalMarkdown, filenames.md, "text/markdown");
+    if (payload.rawHtml) {
+      await downloadFile(payload.rawHtml, filenames.html, "text/html");
+    }
+    addLog(`Saved: ${filenames.md} & ${filenames.html}`, "success");
     return true;
   } finally {
     if (tabId !== null) {
