@@ -1,6 +1,6 @@
 # CleanRead
 
-A lightweight MS Edge / Google Chrome extension (Manifest V3) that takes a pasted list of URLs, opens them one at a time, strips out navigation bars, headers, footers, sidebars, pop-ups, and media, and saves screen-reader-friendly, text-only Markdown files with `URL` and UTC `Timestamp` frontmatter.
+A lightweight MS Edge / Google Chrome extension (Manifest V3) that takes a pasted list of URLs, opens them one at a time, strips out navigation bars, headers, footers, sidebars, pop-ups, and media, and saves screen-reader-friendly, text-only Markdown files with `URL` and UTC `Retrieved-Timestamp` frontmatter.
 
 ## Output Format
 
@@ -11,7 +11,7 @@ Each page is saved to `Downloads/<Subfolder>/` (default `Downloads/CleanRead/`) 
 ```markdown
 ---
 URL: https://example.com/article
-Timestamp: 2026-11-07T05:44:30.774Z
+Retrieved-Timestamp: 2026-11-07T05:44:30.774Z
 ---
 
 # Article Title
