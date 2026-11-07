@@ -43,7 +43,7 @@ function sleep(ms) {
  * Waits until a tab reaches status === "complete" or times out after timeoutMs.
  * Even on timeout (e.g. a stalled 3rd-party tracker), we still proceed to extract the DOM.
  */
-function waitForTabComplete(tabId, timeoutMs = 25000) {
+function waitForTabComplete(tabId, timeoutMs = 30000) {
   return new Promise((resolve) => {
     let settled = false;
 
@@ -233,17 +233,25 @@ function simulateHumanActivity(durationMs) {
   });
 }
 
-async function processSingleUrl(url, subfolder, isSingleWorker = false) {
+async function processSingleUrl(
+  url,
+  subfolder,
+  isSingleWorker = false,
+  minWait = 7,
+  maxWait = 21
+) {
   let tabId = null;
   try {
     const tab = await chrome.tabs.create({ url, active: isSingleWorker });
     tabId = tab.id;
 
-    // Wait for initial page complete
-    await waitForTabComplete(tabId, 25000);
+    // Wait for initial page complete (30s timeout guard)
+    await waitForTabComplete(tabId, 30000);
 
-    // Random wait between 7.0 and 21.0 seconds with active mouse & scroll simulation
-    const waitSeconds = (7 + Math.random() * 14).toFixed(1);
+    // Random wait between minWait and maxWait with active mouse & scroll simulation
+    const low = Math.max(0, Number(minWait) || 7);
+    const high = Math.max(low, Number(maxWait) || 21);
+    const waitSeconds = (low + Math.random() * (high - low)).toFixed(1);
     const waitMs = Math.round(waitSeconds * 1000);
     addLog(`Waiting ${waitSeconds}s (simulating human mouse moves & scroll)...`);
 
@@ -310,8 +318,17 @@ async function processSingleUrl(url, subfolder, isSingleWorker = false) {
   }
 }
 
-async function runBatchQueue(urls, subfolder, concurrency = 3) {
+async function runBatchQueue(
+  urls,
+  subfolder,
+  concurrency = 3,
+  minWait = 7,
+  maxWait = 21
+) {
   const maxWorkers = Math.max(1, Math.min(Number(concurrency) || 3, 11));
+  const low = Math.max(0, Number(minWait) || 7);
+  const high = Math.max(low, Number(maxWait) || 21);
+
   jobState = {
     isRunning: true,
     cancelRequested: false,
@@ -321,10 +338,12 @@ async function runBatchQueue(urls, subfolder, concurrency = 3) {
     failed: 0,
     currentUrl: "",
     concurrency: maxWorkers,
+    minWait: low,
+    maxWait: high,
     logs: []
   };
   addLog(
-    `Starting batch of ${urls.length} URL(s) with ${maxWorkers} tab worker(s) -> Downloads/${jobState.subfolder}/`
+    `Starting batch of ${urls.length} URL(s) with ${maxWorkers} tab worker(s), ${low}-${high}s wait -> Downloads/${jobState.subfolder}/`
   );
 
   let nextIndex = 0;
@@ -340,7 +359,13 @@ async function runBatchQueue(urls, subfolder, concurrency = 3) {
       broadcastState();
 
       try {
-        await processSingleUrl(rawUrl, jobState.subfolder, maxWorkers === 1);
+        await processSingleUrl(
+          rawUrl,
+          jobState.subfolder,
+          maxWorkers === 1,
+          low,
+          high
+        );
         jobState.completed++;
         addLog(`[Worker ${workerId}] Completed (${i + 1}/${urls.length})`, "success");
       } catch (err) {
@@ -387,7 +412,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const urls = Array.isArray(message.urls) ? message.urls : [];
     const subfolder = message.subfolder || "CleanRead";
     const concurrency = parseInt(message.concurrency, 10) || 3;
-    runBatchQueue(urls, subfolder, concurrency);
+    const minWait = parseFloat(message.minWait) || 7;
+    const maxWait = parseFloat(message.maxWait) || 21;
+    runBatchQueue(urls, subfolder, concurrency, minWait, maxWait);
     sendResponse({ ok: true, state: jobState });
     return true;
   }

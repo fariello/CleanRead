@@ -1,6 +1,8 @@
 const subfolderInput = document.getElementById("subfolderInput");
 const folderPreview = document.getElementById("folderPreview");
 const concurrencySelect = document.getElementById("concurrencySelect");
+const minWaitInput = document.getElementById("minWaitInput");
+const maxWaitInput = document.getElementById("maxWaitInput");
 const urlsInput = document.getElementById("urlsInput");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
@@ -74,7 +76,14 @@ function renderState(state) {
 
 // Load saved drafts and live state on popup open
 chrome.storage.local.get(
-  ["cleanReadSubfolder", "cleanReadConcurrency", "cleanReadUrlsDraft", "cleanReadJobState"],
+  [
+    "cleanReadSubfolder",
+    "cleanReadConcurrency",
+    "cleanReadMinWait",
+    "cleanReadMaxWait",
+    "cleanReadUrlsDraft",
+    "cleanReadJobState"
+  ],
   (res) => {
     if (res.cleanReadSubfolder) {
       subfolderInput.value = res.cleanReadSubfolder;
@@ -82,6 +91,12 @@ chrome.storage.local.get(
     }
     if (res.cleanReadConcurrency) {
       concurrencySelect.value = res.cleanReadConcurrency;
+    }
+    if (res.cleanReadMinWait !== undefined && res.cleanReadMinWait !== null) {
+      minWaitInput.value = res.cleanReadMinWait;
+    }
+    if (res.cleanReadMaxWait !== undefined && res.cleanReadMaxWait !== null) {
+      maxWaitInput.value = res.cleanReadMaxWait;
     }
     if (res.cleanReadUrlsDraft) {
       urlsInput.value = res.cleanReadUrlsDraft;
@@ -114,6 +129,20 @@ concurrencySelect.addEventListener("change", () => {
   chrome.storage.local.set({ cleanReadConcurrency: concurrencySelect.value });
 });
 
+minWaitInput.addEventListener("input", () => {
+  const val = parseFloat(minWaitInput.value);
+  if (!isNaN(val)) {
+    chrome.storage.local.set({ cleanReadMinWait: val });
+  }
+});
+
+maxWaitInput.addEventListener("input", () => {
+  const val = parseFloat(maxWaitInput.value);
+  if (!isNaN(val)) {
+    chrome.storage.local.set({ cleanReadMaxWait: val });
+  }
+});
+
 urlsInput.addEventListener("input", () => {
   chrome.storage.local.set({ cleanReadUrlsDraft: urlsInput.value });
 });
@@ -127,14 +156,28 @@ startBtn.addEventListener("click", () => {
 
   const subfolder = subfolderInput.value.trim() || "CleanRead";
   const concurrency = parseInt(concurrencySelect.value, 10) || 3;
-  chrome.storage.local.set({ cleanReadSubfolder: subfolder, cleanReadConcurrency: String(concurrency) });
+  let minWait = parseFloat(minWaitInput.value);
+  let maxWait = parseFloat(maxWaitInput.value);
+  if (isNaN(minWait) || minWait < 0) minWait = 7;
+  if (isNaN(maxWait) || maxWait < minWait) maxWait = Math.max(minWait, 21);
+  minWaitInput.value = minWait;
+  maxWaitInput.value = maxWait;
+
+  chrome.storage.local.set({
+    cleanReadSubfolder: subfolder,
+    cleanReadConcurrency: String(concurrency),
+    cleanReadMinWait: minWait,
+    cleanReadMaxWait: maxWait
+  });
 
   chrome.runtime.sendMessage(
     {
       type: "START_BATCH",
       urls,
       subfolder,
-      concurrency
+      concurrency,
+      minWait,
+      maxWait
     },
     (res) => {
       if (res && res.state) {
