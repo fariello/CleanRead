@@ -149,15 +149,102 @@ function downloadMarkdownFile(markdownText, filename) {
   });
 }
 
+/**
+ * Injected into the target tab to simulate realistic human browsing:
+ * smooth mouse movements, pointer events, and natural scrolling
+ * while waiting out Cloudflare challenges and dynamic JS rendering.
+ */
+function simulateHumanActivity(durationMs) {
+  return new Promise((resolve) => {
+    const endTime = Date.now() + durationMs;
+
+    let curX = Math.floor(window.innerWidth * 0.3 + Math.random() * window.innerWidth * 0.4);
+    let curY = Math.floor(window.innerHeight * 0.3 + Math.random() * window.innerHeight * 0.4);
+
+    function dispatchPoint(x, y) {
+      const eventInit = {
+        clientX: x,
+        clientY: y,
+        screenX: x + (window.screenX || 0),
+        screenY: y + (window.screenY || 0),
+        bubbles: true,
+        cancelable: true,
+        view: window
+      };
+      const el = document.elementFromPoint(x, y) || document.body || document.documentElement;
+      if (el) {
+        try {
+          if (window.PointerEvent) {
+            el.dispatchEvent(new PointerEvent("pointermove", eventInit));
+          }
+          el.dispatchEvent(new MouseEvent("mousemove", eventInit));
+        } catch (_) {}
+      }
+    }
+
+    function step() {
+      const now = Date.now();
+      if (now >= endTime) {
+        resolve();
+        return;
+      }
+
+      const maxW = Math.max(300, window.innerWidth - 40);
+      const maxH = Math.max(300, window.innerHeight - 40);
+      const targetX = Math.max(20, Math.min(maxW, curX + (Math.random() - 0.5) * 350));
+      const targetY = Math.max(20, Math.min(maxH, curY + (Math.random() - 0.5) * 250));
+
+      const steps = 6 + Math.floor(Math.random() * 6);
+      for (let s = 1; s <= steps; s++) {
+        const t = s / steps;
+        const intermediateX = Math.round(
+          curX + (targetX - curX) * t + Math.sin(t * Math.PI) * ((Math.random() - 0.5) * 15)
+        );
+        const intermediateY = Math.round(
+          curY + (targetY - curY) * t + Math.sin(t * Math.PI) * ((Math.random() - 0.5) * 15)
+        );
+        dispatchPoint(intermediateX, intermediateY);
+      }
+      curX = targetX;
+      curY = targetY;
+
+      // Realistic human-like scrolling (downwards, occasionally slight back up)
+      if (Math.random() < 0.4) {
+        const scrollDelta = (Math.random() < 0.7 ? 1 : -1) * Math.floor(80 + Math.random() * 160);
+        window.scrollBy({ top: scrollDelta, behavior: "smooth" });
+      }
+
+      const nextInterval = 200 + Math.floor(Math.random() * 400);
+      setTimeout(step, Math.min(nextInterval, Math.max(50, endTime - Date.now())));
+    }
+
+    step();
+  });
+}
+
 async function processSingleUrl(url, index, total, subfolder) {
   let tabId = null;
   try {
     const tab = await chrome.tabs.create({ url, active: true });
     tabId = tab.id;
 
-    // Wait for page load + brief settle delay for dynamic JS content
+    // Wait for initial page complete
     await waitForTabComplete(tabId, 25000);
-    await sleep(1500);
+
+    // Random wait between 7.0 and 21.0 seconds with active mouse & scroll simulation
+    const waitSeconds = (7 + Math.random() * 14).toFixed(1);
+    const waitMs = Math.round(waitSeconds * 1000);
+    addLog(`Waiting ${waitSeconds}s (simulating human mouse moves & scroll)...`);
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: simulateHumanActivity,
+        args: [waitMs]
+      });
+    } catch (_) {
+      await sleep(waitMs);
+    }
 
     const timestampUtc = new Date().toISOString();
 

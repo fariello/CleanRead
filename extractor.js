@@ -174,6 +174,20 @@
       if (tag === "code") {
         return ` \`${inner.trim()}\` `;
       }
+      if (tag === "a") {
+        const rawHref = node.getAttribute("href") || "";
+        const linkText = inner.trim();
+        if (!linkText) return "";
+        if (!rawHref || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) {
+          return linkText;
+        }
+        try {
+          const absUrl = new URL(rawHref, document.baseURI).href;
+          return ` [${linkText}](${absUrl}) `;
+        } catch (_) {
+          return linkText;
+        }
+      }
       return inner;
     }
 
