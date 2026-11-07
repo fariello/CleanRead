@@ -96,9 +96,16 @@ function sanitizeSubfolder(folder) {
   return cleaned || "CleanRead";
 }
 
-function buildFilenames(subfolder, index, total, title, url) {
-  const padWidth = Math.max(2, String(total).length);
-  const prefix = String(index).padStart(padWidth, "0");
+function getLocalDateString() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
+}
+
+function buildFilenames(subfolder, title, url) {
+  const dateStr = getLocalDateString();
 
   let base = (title || "").trim();
   if (!base || base.toLowerCase() === "untitled") {
@@ -118,7 +125,7 @@ function buildFilenames(subfolder, index, total, title, url) {
     .slice(0, 70) || "article";
 
   const folder = sanitizeSubfolder(subfolder);
-  const basePath = `${folder}/${prefix}-${slug}`;
+  const basePath = `${folder}/${dateStr}-${slug}`;
   return {
     md: `${basePath}.md`,
     html: `${basePath}.html`
@@ -284,7 +291,7 @@ async function processSingleUrl(url, index, total, subfolder) {
     ].join("\n");
 
     const finalMarkdown = `${frontmatter}\n${payload.markdownBody.trim()}\n`;
-    const filenames = buildFilenames(subfolder, index, total, payload.title, url);
+    const filenames = buildFilenames(subfolder, payload.title, url);
 
     await downloadFile(finalMarkdown, filenames.md, "text/markdown");
     if (payload.rawHtml) {
