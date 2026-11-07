@@ -311,7 +311,7 @@ async function processSingleUrl(url, subfolder, isSingleWorker = false) {
 }
 
 async function runBatchQueue(urls, subfolder, concurrency = 3) {
-  const maxWorkers = Math.max(1, Math.min(Number(concurrency) || 3, 5));
+  const maxWorkers = Math.max(1, Math.min(Number(concurrency) || 3, 11));
   jobState = {
     isRunning: true,
     cancelRequested: false,
