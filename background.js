@@ -396,11 +396,84 @@ async function runBatchQueue(
   broadcastState();
 }
 
+async function processCurrentTab(tabId, url, subfolder) {
+  const timestampUtc = new Date().toISOString();
+
+  // Inject Mozilla Readability.js first
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["Readability.js"]
+  });
+
+  // Inject CleanRead extractor and capture payload
+  const injectionResults = await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["extractor.js"]
+  });
+
+  const payload =
+    injectionResults && injectionResults[0] && injectionResults[0].result
+      ? injectionResults[0].result
+      : null;
+
+  if (!payload || !payload.markdownBody) {
+    throw new Error(
+      (payload && payload.error) || "No readable content found on page"
+    );
+  }
+
+  const frontmatter = [
+    "---",
+    `URL: ${url}`,
+    `Retrieved-Timestamp: ${timestampUtc}`,
+    "---",
+    ""
+  ].join("\n");
+
+  const finalMarkdown = `${frontmatter}\n${payload.markdownBody.trim()}\n`;
+  const filenames = buildFilenames(subfolder, payload.title, url);
+
+  await downloadFile(finalMarkdown, filenames.md, "text/markdown");
+  if (payload.rawHtml) {
+    await downloadFile(payload.rawHtml, filenames.html, "text/html");
+  }
+
+  addLog(`Saved current page: ${filenames.md} & ${filenames.html}`, "success");
+  return {
+    ok: true,
+    title: payload.title,
+    filename: `${filenames.md} & ${filenames.html}`,
+    md: filenames.md,
+    html: filenames.html
+  };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || !message.type) return;
 
   if (message.type === "GET_STATE") {
     sendResponse({ state: jobState });
+    return true;
+  }
+
+  if (message.type === "SAVE_CURRENT_TAB") {
+    const tabId = message.tabId;
+    const url = message.url;
+    const subfolder = message.subfolder || "CleanRead";
+
+    if (!tabId || !url) {
+      sendResponse({ ok: false, error: "No active tab specified." });
+      return true;
+    }
+
+    processCurrentTab(tabId, url, subfolder)
+      .then((res) => sendResponse(res))
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          error: (err && err.message) || String(err)
+        })
+      );
     return true;
   }
 

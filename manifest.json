@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "CleanRead",
-  "version": "1.0.0",
-  "description": "Opens a pasted list of URLs one at a time and saves screen-reader-friendly, text-only Markdown with URL & UTC Timestamp frontmatter.",
+  "version": "1.0.1",
+  "description": "Opens a pasted list of URLs or converts the current active webpage, saving screen-reader-friendly, text-only Markdown with URL & UTC Timestamp frontmatter.",
   "permissions": [
+    "activeTab",
     "tabs",
     "scripting",
     "downloads",
@@ -16,7 +17,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "CleanRead — Bulk Text-to-Markdown Saver",
+    "default_title": "CleanRead — Text-to-Markdown Saver",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icon16.png",

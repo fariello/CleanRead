@@ -1,8 +1,11 @@
+const versionBadge = document.getElementById("versionBadge");
 const subfolderInput = document.getElementById("subfolderInput");
 const folderPreview = document.getElementById("folderPreview");
 const concurrencySelect = document.getElementById("concurrencySelect");
 const minWaitInput = document.getElementById("minWaitInput");
 const maxWaitInput = document.getElementById("maxWaitInput");
+const currentTabHint = document.getElementById("currentTabHint");
+const saveCurrentBtn = document.getElementById("saveCurrentBtn");
 const urlsInput = document.getElementById("urlsInput");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
@@ -11,6 +14,37 @@ const statusText = document.getElementById("statusText");
 const counterText = document.getElementById("counterText");
 const progressFill = document.getElementById("progressFill");
 const logsContainer = document.getElementById("logsContainer");
+
+// Display dynamic version from manifest
+try {
+  const manifest = chrome.runtime.getManifest();
+  if (versionBadge && manifest.version) {
+    versionBadge.textContent = `v${manifest.version}`;
+  }
+} catch (_) {}
+
+let activeTab = null;
+
+// Inspect the currently active tab on popup open
+chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+  if (!tabs || tabs.length === 0) {
+    if (currentTabHint) currentTabHint.textContent = "No active tab detected.";
+    if (saveCurrentBtn) saveCurrentBtn.disabled = true;
+    return;
+  }
+  const tab = tabs[0];
+  activeTab = tab;
+
+  if (tab.url && (tab.url.startsWith("http://") || tab.url.startsWith("https://"))) {
+    if (saveCurrentBtn) saveCurrentBtn.disabled = false;
+    let label = (tab.title || tab.url).trim();
+    if (label.length > 38) label = label.slice(0, 35) + "...";
+    if (currentTabHint) currentTabHint.textContent = `"${label}"`;
+  } else {
+    if (saveCurrentBtn) saveCurrentBtn.disabled = true;
+    if (currentTabHint) currentTabHint.textContent = "Not a regular web page (http/https).";
+  }
+});
 
 function parseUrls(rawText) {
   const lines = (rawText || "")
@@ -198,3 +232,54 @@ stopBtn.addEventListener("click", () => {
 openFolderBtn.addEventListener("click", () => {
   chrome.downloads.showDefaultFolder();
 });
+
+if (saveCurrentBtn) {
+  saveCurrentBtn.addEventListener("click", () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs || tabs.length === 0) return;
+      const tab = tabs[0];
+      if (!tab.url || (!tab.url.startsWith("http://") && !tab.url.startsWith("https://"))) {
+        statusText.textContent = "Active tab is not a regular web page (http/https).";
+        return;
+      }
+
+      const origText = saveCurrentBtn.textContent;
+      saveCurrentBtn.disabled = true;
+      saveCurrentBtn.textContent = "Saving Current Page...";
+      statusText.textContent = "Extracting clean markdown from active tab...";
+
+      const subfolder = subfolderInput.value.trim() || "CleanRead";
+
+      chrome.runtime.sendMessage(
+        {
+          type: "SAVE_CURRENT_TAB",
+          tabId: tab.id,
+          url: tab.url,
+          title: tab.title,
+          subfolder
+        },
+        (res) => {
+          if (res && res.ok) {
+            saveCurrentBtn.textContent = "✓ Saved to Downloads!";
+            saveCurrentBtn.style.background = "#15803d";
+            statusText.textContent = `Saved: ${res.filename}`;
+            setTimeout(() => {
+              saveCurrentBtn.textContent = origText;
+              saveCurrentBtn.style.background = "";
+              saveCurrentBtn.disabled = false;
+            }, 2500);
+          } else {
+            saveCurrentBtn.textContent = "❌ Failed";
+            saveCurrentBtn.style.background = "#b91c1c";
+            statusText.textContent = `Error: ${(res && res.error) || "Extraction failed"}`;
+            setTimeout(() => {
+              saveCurrentBtn.textContent = origText;
+              saveCurrentBtn.style.background = "";
+              saveCurrentBtn.disabled = false;
+            }, 3000);
+          }
+        }
+      );
+    });
+  });
+}
