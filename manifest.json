@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CleanRead",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Converts web pages, text, and Markdown files into screen-reader-friendly Markdown and downloads raw files (including PDFs, docs, HTML, and binaries).",
   "permissions": [
     "activeTab",

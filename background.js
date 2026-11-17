@@ -690,7 +690,7 @@ async function processSingleUrl(
         dispositionFilename: headInfo.dispositionFilename
       });
       addLog(`Saved raw file: ${result.savedSummary}`, "success");
-      return true;
+      return { kind: "binary", ...result };
     }
 
     if (info.kind === "text") {
@@ -706,7 +706,7 @@ async function processSingleUrl(
           dispositionFilename: headInfo.dispositionFilename
         });
         addLog(`Saved text + MD: ${result.savedSummary}`, "success");
-        return true;
+        return { kind: "text", ...result };
       } catch (_) {
         // Fall through to tab-based handling if fetch failed
       }
@@ -758,7 +758,7 @@ async function processSingleUrl(
         subfolder
       });
       addLog(`Saved raw file: ${result.savedSummary}`, "success");
-      return true;
+      return { kind: "binary", ...result };
     }
 
     if (info.kind === "text") {
@@ -775,12 +775,12 @@ async function processSingleUrl(
         subfolder
       });
       addLog(`Saved text + MD: ${result.savedSummary}`, "success");
-      return true;
+      return { kind: "text", ...result };
     }
 
     const result = await extractHtmlPageFromTab(tabId, effectiveUrl, subfolder, info.ext);
     addLog(`Saved: ${result.savedSummary}`, "success");
-    return true;
+    return { kind: "html", ...result };
   } finally {
     if (tabId !== null) {
       try {
@@ -863,6 +863,101 @@ async function processCurrentTab(tabId, url, title, subfolder) {
   };
 }
 
+function getLocalDateTimePrefix(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  const mm = pad(date.getMonth() + 1);
+  const dd = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const min = pad(date.getMinutes());
+  const ss = pad(date.getSeconds());
+  return `${yyyy}${mm}${dd}-${hh}${min}${ss}`;
+}
+
+function getLocalIsoTimestamp(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  const mm = pad(date.getMonth() + 1);
+  const dd = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const min = pad(date.getMinutes());
+  const ss = pad(date.getSeconds());
+  const tzOffset = -date.getTimezoneOffset();
+  const sign = tzOffset >= 0 ? "+" : "-";
+  const tzh = pad(Math.floor(Math.abs(tzOffset) / 60));
+  const tzm = pad(Math.abs(tzOffset) % 60);
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}${sign}${tzh}:${tzm}`;
+}
+
+function buildBatchReportMarkdown({
+  subfolder,
+  startedAt,
+  completedAt,
+  concurrency,
+  minWait,
+  maxWait,
+  stoppedEarly,
+  outcomes
+}) {
+  const durationSec = ((completedAt.getTime() - startedAt.getTime()) / 1000).toFixed(1);
+  const successful = outcomes.filter((o) => o.status === "success");
+  const unsuccessful = outcomes.filter((o) => o.status !== "success");
+
+  const lines = [
+    "# CleanRead Batch Report",
+    "",
+    `- **Started (Local):** ${getLocalIsoTimestamp(startedAt)}`,
+    `- **Completed (Local):** ${getLocalIsoTimestamp(completedAt)}`,
+    `- **Started (UTC):** ${startedAt.toISOString()}`,
+    `- **Completed (UTC):** ${completedAt.toISOString()}`,
+    `- **Duration:** ${durationSec}s`,
+    `- **Directory:** Downloads/${subfolder}/`,
+    `- **Settings:** ${concurrency} tab worker(s), ${minWait}-${maxWait}s wait`,
+    `- **Status:** ${stoppedEarly ? "Stopped early by user" : "Completed"}`,
+    `- **Total URLs:** ${outcomes.length}`,
+    `- **Successful:** ${successful.length}`,
+    `- **Unsuccessful:** ${unsuccessful.length}`,
+    "",
+    "## Activity Log",
+    ""
+  ];
+
+  for (const item of outcomes) {
+    const num = item.index + 1;
+    if (item.status === "success") {
+      const kind = item.kind ? ` [${item.kind}]` : "";
+      lines.push(
+        `${num}. **SUCCESS**${kind} (${item.durationSec}s) — \`${item.url}\` -> \`${item.savedSummary || "Saved"}\``
+      );
+    } else if (item.status === "cancelled") {
+      lines.push(
+        `${num}. **CANCELLED** — \`${item.url}\` (Stopped before processing)`
+      );
+    } else {
+      lines.push(
+        `${num}. **FAILED** (${item.durationSec}s) — \`${item.url}\` — Error: ${item.error || "Unknown error"}`
+      );
+    }
+  }
+
+  lines.push("");
+  lines.push("## Successful URLS");
+  lines.push("");
+  for (const item of successful) {
+    lines.push(item.url);
+  }
+
+  lines.push("");
+  lines.push("## Unsuccessful URLs");
+  lines.push("");
+  for (const item of unsuccessful) {
+    lines.push(item.url);
+  }
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 async function runBatchQueue(
   urls,
   subfolder,
@@ -873,6 +968,7 @@ async function runBatchQueue(
   const maxWorkers = Math.max(1, Math.min(Number(concurrency) || 3, 11));
   const low = Math.max(0, Number(minWait) || 7);
   const high = Math.max(low, Number(maxWait) || 21);
+  const startedAt = new Date();
 
   jobState = {
     isRunning: true,
@@ -892,31 +988,51 @@ async function runBatchQueue(
   );
 
   let nextIndex = 0;
+  const outcomes = new Array(urls.length);
 
   async function worker(workerId) {
     while (!jobState.cancelRequested) {
       if (nextIndex >= urls.length) break;
       const i = nextIndex++;
       const rawUrl = urls[i];
+      const itemStart = Date.now();
 
       jobState.currentUrl = rawUrl;
       addLog(`[Worker ${workerId}] Processing (${i + 1}/${urls.length}): ${rawUrl}`);
       broadcastState();
 
       try {
-        await processSingleUrl(
+        const res = await processSingleUrl(
           rawUrl,
           jobState.subfolder,
           maxWorkers === 1,
           low,
           high
         );
+        const durationSec = ((Date.now() - itemStart) / 1000).toFixed(1);
+        outcomes[i] = {
+          index: i,
+          url: rawUrl,
+          status: "success",
+          kind: res && res.kind ? res.kind : "",
+          savedSummary: res && res.savedSummary ? res.savedSummary : "",
+          durationSec
+        };
         jobState.completed++;
         addLog(`[Worker ${workerId}] Completed (${i + 1}/${urls.length})`, "success");
       } catch (err) {
+        const durationSec = ((Date.now() - itemStart) / 1000).toFixed(1);
+        const errorMsg = err && err.message ? err.message : String(err);
+        outcomes[i] = {
+          index: i,
+          url: rawUrl,
+          status: "failed",
+          error: errorMsg,
+          durationSec
+        };
         jobState.failed++;
         addLog(
-          `[Worker ${workerId}] Error on ${rawUrl}: ${err && err.message ? err.message : String(err)}`,
+          `[Worker ${workerId}] Error on ${rawUrl}: ${errorMsg}`,
           "error"
         );
       }
@@ -931,6 +1047,42 @@ async function runBatchQueue(
     workerPromises.push(worker(w));
   }
   await Promise.all(workerPromises);
+
+  // Fill any unprocessed URLs if stopped early
+  for (let i = 0; i < urls.length; i++) {
+    if (!outcomes[i]) {
+      outcomes[i] = {
+        index: i,
+        url: urls[i],
+        status: "cancelled",
+        error: "Stopped before processing",
+        durationSec: "0.0"
+      };
+    }
+  }
+
+  const completedAt = new Date();
+  const reportFilename = `${jobState.subfolder}/${getLocalDateTimePrefix(completedAt)}-cleanread-report.md`;
+  const reportMarkdown = buildBatchReportMarkdown({
+    subfolder: jobState.subfolder,
+    startedAt,
+    completedAt,
+    concurrency: maxWorkers,
+    minWait: low,
+    maxWait: high,
+    stoppedEarly: Boolean(jobState.cancelRequested),
+    outcomes
+  });
+
+  try {
+    await downloadFile(reportMarkdown, reportFilename, "text/markdown");
+    addLog(`Report saved: ${reportFilename}`, "success");
+  } catch (err) {
+    addLog(
+      `Failed to save report: ${err && err.message ? err.message : String(err)}`,
+      "error"
+    );
+  }
 
   jobState.isRunning = false;
   jobState.currentUrl = "";
