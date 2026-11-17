@@ -25,6 +25,15 @@ try {
 
 let activeTab = null;
 
+function isSupportedTabUrl(url) {
+  return Boolean(
+    url &&
+      (url.startsWith("http://") ||
+        url.startsWith("https://") ||
+        url.startsWith("file://"))
+  );
+}
+
 // Inspect the currently active tab on popup open
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   if (!tabs || tabs.length === 0) {
@@ -35,14 +44,14 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   const tab = tabs[0];
   activeTab = tab;
 
-  if (tab.url && (tab.url.startsWith("http://") || tab.url.startsWith("https://"))) {
+  if (isSupportedTabUrl(tab.url)) {
     if (saveCurrentBtn) saveCurrentBtn.disabled = false;
     let label = (tab.title || tab.url).trim();
     if (label.length > 38) label = label.slice(0, 35) + "...";
     if (currentTabHint) currentTabHint.textContent = `"${label}"`;
   } else {
     if (saveCurrentBtn) saveCurrentBtn.disabled = true;
-    if (currentTabHint) currentTabHint.textContent = "Not a regular web page (http/https).";
+    if (currentTabHint) currentTabHint.textContent = "Not a regular web page or file.";
   }
 });
 
@@ -238,15 +247,15 @@ if (saveCurrentBtn) {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs || tabs.length === 0) return;
       const tab = tabs[0];
-      if (!tab.url || (!tab.url.startsWith("http://") && !tab.url.startsWith("https://"))) {
-        statusText.textContent = "Active tab is not a regular web page (http/https).";
+      if (!isSupportedTabUrl(tab.url)) {
+        statusText.textContent = "Active tab is not a supported web page or file URL.";
         return;
       }
 
       const origText = saveCurrentBtn.textContent;
       saveCurrentBtn.disabled = true;
-      saveCurrentBtn.textContent = "Saving Current Page...";
-      statusText.textContent = "Extracting clean markdown from active tab...";
+      saveCurrentBtn.textContent = "Saving...";
+      statusText.textContent = "Processing active tab...";
 
       const subfolder = subfolderInput.value.trim() || "CleanRead";
 

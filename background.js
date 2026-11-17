@@ -1,8 +1,73 @@
 /**
- * CleanRead Background Service Worker
- * Orchestrates opening URLs one at a time, running Readability + text-only Markdown extraction,
- * saving each file with URL + UTC Timestamp frontmatter, and closing the tab.
+ * CleanRead Background Service Worker (v1.0.2)
+ * - For HTML, plain text, Markdown, JSON, XML, CSV, and similar text files:
+ *   generates a clean *.md file (with URL & UTC Retrieved-Timestamp frontmatter)
+ *   AND downloads the raw file.
+ * - For all other files (PDFs, Office docs, archives, images, media, binaries):
+ *   downloads the raw file directly with YYYYMMDD-<slug>.<ext> naming.
  */
+
+const HTML_EXTENSIONS = new Set(["htm", "html", "xhtml", "shtml"]);
+const MD_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
+const TEXT_EXTENSIONS = new Set([
+  "txt", "text", "md", "markdown", "mdx", "rst", "adoc", "asciidoc",
+  "htm", "html", "xhtml", "shtml",
+  "csv", "tsv", "log", "json", "jsonl", "xml", "yaml", "yml",
+  "ini", "conf", "cfg", "toml", "css", "js", "ts", "py", "sh", "sql",
+  "svg"
+]);
+
+const KNOWN_BINARY_EXTENSIONS = new Set([
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
+  "rtf", "epub", "mobi", "zip", "tar", "gz", "tgz", "bz2", "xz", "rar", "7z",
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tif", "tiff",
+  "mp3", "wav", "ogg", "flac", "aac", "m4a",
+  "mp4", "webm", "mkv", "avi", "mov", "exe", "msi", "dmg", "iso", "bin"
+]);
+
+const MIME_TO_EXT = {
+  "text/html": "html",
+  "application/xhtml+xml": "xhtml",
+  "text/plain": "txt",
+  "text/markdown": "md",
+  "text/x-markdown": "md",
+  "text/csv": "csv",
+  "text/tab-separated-values": "tsv",
+  "application/json": "json",
+  "text/json": "json",
+  "application/xml": "xml",
+  "text/xml": "xml",
+  "application/yaml": "yaml",
+  "text/yaml": "yaml",
+  "image/svg+xml": "svg",
+  "application/javascript": "js",
+  "text/javascript": "js",
+  "application/pdf": "pdf",
+  "application/zip": "zip",
+  "application/x-zip-compressed": "zip",
+  "application/gzip": "gz",
+  "application/x-tar": "tar",
+  "application/x-7z-compressed": "7z",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.ms-powerpoint": "ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/epub+zip": "epub",
+  "application/rtf": "rtf",
+  "text/rtf": "rtf",
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+  "audio/mpeg": "mp3",
+  "audio/wav": "wav",
+  "audio/ogg": "ogg",
+  "video/mp4": "mp4",
+  "video/webm": "webm"
+};
 
 let jobState = {
   isRunning: false,
@@ -39,10 +104,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Waits until a tab reaches status === "complete" or times out after timeoutMs.
- * Even on timeout (e.g. a stalled 3rd-party tracker), we still proceed to extract the DOM.
- */
 function waitForTabComplete(tabId, timeoutMs = 30000) {
   return new Promise((resolve) => {
     let settled = false;
@@ -73,7 +134,6 @@ function waitForTabComplete(tabId, timeoutMs = 30000) {
     chrome.tabs.onUpdated.addListener(onUpdated);
     chrome.tabs.onRemoved.addListener(onRemoved);
 
-    // Check immediately in case it already completed
     chrome.tabs.get(tabId, (tab) => {
       if (chrome.runtime.lastError || !tab) {
         finish();
@@ -104,42 +164,167 @@ function getLocalDateString() {
   return `${year}${month}${day}`;
 }
 
-function buildFilenames(subfolder, title, url) {
+function extractFilenameExt(filenameOrPath) {
+  if (!filenameOrPath) return "";
+  const base = filenameOrPath.split(/[\\/]/).pop() || "";
+  const dotIdx = base.lastIndexOf(".");
+  if (dotIdx <= 0 || dotIdx === base.length - 1) return "";
+  const ext = base.slice(dotIdx + 1).toLowerCase();
+  if (!/^[a-z0-9]{1,10}$/.test(ext)) return "";
+  if (TEXT_EXTENSIONS.has(ext) || KNOWN_BINARY_EXTENSIONS.has(ext)) {
+    return ext;
+  }
+  return "";
+}
+
+function getUrlExtension(url) {
+  try {
+    const parsed = new URL(url);
+    return extractFilenameExt(parsed.pathname);
+  } catch (_) {
+    return "";
+  }
+}
+
+function parseContentDispositionFilename(headerValue) {
+  if (!headerValue) return "";
+  const utf8Match = headerValue.match(/filename\*\s*=\s*(?:UTF-8|utf-8)''([^;\r\n]+)/i);
+  if (utf8Match && utf8Match[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim().replace(/^["']|["']$/g, ""));
+    } catch (_) {}
+  }
+  const plainMatch = headerValue.match(/filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;\r\n]+)/i);
+  const raw = (plainMatch && (plainMatch[1] || plainMatch[2])) || "";
+  return raw.trim().replace(/^["']|["']$/g, "");
+}
+
+function stripKnownExtension(name) {
+  if (!name) return "";
+  const dotIdx = name.lastIndexOf(".");
+  if (dotIdx > 0) {
+    const ext = name.slice(dotIdx + 1).toLowerCase();
+    if (TEXT_EXTENSIONS.has(ext) || KNOWN_BINARY_EXTENSIONS.has(ext)) {
+      return name.slice(0, dotIdx);
+    }
+  }
+  return name;
+}
+
+function buildBaseFilePath(subfolder, title, url, dispositionFilename = "") {
   const dateStr = getLocalDateString();
 
-  let base = (title || "").trim();
+  let base = stripKnownExtension((title || "").trim());
   if (!base || base.toLowerCase() === "untitled") {
+    base = stripKnownExtension((dispositionFilename || "").trim());
+  }
+  if (!base) {
     try {
       const parsed = new URL(url);
-      base = (parsed.hostname + parsed.pathname).replace(/\/+$/, "");
+      const pathClean = stripKnownExtension(parsed.pathname.replace(/\/+$/, ""));
+      base = parsed.hostname + pathClean;
     } catch (_) {
-      base = "page";
+      base = "file";
     }
   }
 
-  const slug = base
-    .toLowerCase()
-    .replace(/['’]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 70) || "article";
+  const slug =
+    base
+      .toLowerCase()
+      .replace(/['’]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 70) || "file";
 
   const folder = sanitizeSubfolder(subfolder);
-  const basePath = `${folder}/${dateStr}-${slug}`;
-  return {
-    md: `${basePath}.md`,
-    html: `${basePath}.html`
-  };
+  return `${folder}/${dateStr}-${slug}`;
 }
 
-function downloadFile(content, filename, mimeType = "text/plain") {
-  return new Promise((resolve, reject) => {
-    const dataUrl =
-      `data:${mimeType};charset=utf-8,` + encodeURIComponent(content);
+function classifyResource(url, contentType = "", dispositionFilename = "") {
+  const mime = (contentType || "").split(";")[0].trim().toLowerCase();
+  const dispExt = extractFilenameExt(dispositionFilename);
+  const urlExt = getUrlExtension(url);
+  const mimeExt = MIME_TO_EXT[mime] || "";
 
+  // Determine effective extension
+  let ext = dispExt || mimeExt || urlExt;
+
+  // Classify HTML vs Text-like vs Binary
+  const isHtmlMime = mime === "text/html" || mime === "application/xhtml+xml";
+  const isTextMime =
+    !isHtmlMime &&
+    (mime.startsWith("text/") ||
+      mime === "application/json" ||
+      mime === "application/xml" ||
+      mime === "application/yaml" ||
+      mime === "application/javascript" ||
+      mime === "application/ecmascript" ||
+      mime === "image/svg+xml" ||
+      mime.endsWith("+json") ||
+      mime.endsWith("+xml"));
+
+  if (isHtmlMime || (!mime && (HTML_EXTENSIONS.has(ext) || !ext))) {
+    return { kind: "html", ext: ext === "htm" ? "htm" : "html", mime };
+  }
+
+  if (isTextMime || (!mime && TEXT_EXTENSIONS.has(ext))) {
+    return { kind: "text", ext: ext || "txt", mime };
+  }
+
+  return { kind: "binary", ext: ext || "bin", mime };
+}
+
+function waitForDownloadFinish(downloadId, timeoutMs = 60000) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      chrome.downloads.onChanged.removeListener(onChanged);
+      clearTimeout(timer);
+    };
+
+    const finishOk = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(downloadId);
+    };
+
+    const finishErr = (msg) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error(msg || "Download interrupted"));
+    };
+
+    const onChanged = (delta) => {
+      if (delta.id !== downloadId) return;
+      if (delta.state && delta.state.current === "complete") {
+        finishOk();
+      } else if (delta.state && delta.state.current === "interrupted") {
+        finishErr((delta.error && delta.error.current) || "Download interrupted");
+      }
+    };
+
+    const timer = setTimeout(finishOk, timeoutMs);
+    chrome.downloads.onChanged.addListener(onChanged);
+
+    chrome.downloads.search({ id: downloadId }, (items) => {
+      if (items && items[0]) {
+        if (items[0].state === "complete") finishOk();
+        else if (items[0].state === "interrupted") {
+          finishErr(items[0].error || "Download interrupted");
+        }
+      }
+    });
+  });
+}
+
+function downloadFromUrl(sourceUrl, filename) {
+  return new Promise((resolve, reject) => {
     chrome.downloads.download(
       {
-        url: dataUrl,
+        url: sourceUrl,
         filename,
         conflictAction: "uniquify",
         saveAs: false
@@ -153,11 +338,258 @@ function downloadFile(content, filename, mimeType = "text/plain") {
             )
           );
         } else {
-          resolve(downloadId);
+          waitForDownloadFinish(downloadId).then(resolve, reject);
         }
       }
     );
   });
+}
+
+function downloadFile(content, filename, mimeType = "text/plain") {
+  const dataUrl = `data:${mimeType};charset=utf-8,` + encodeURIComponent(content);
+  return downloadFromUrl(dataUrl, filename);
+}
+
+async function probeRemoteHeaders(url, timeoutMs = 4500) {
+  if (!/^https?:\/\//i.test(url)) return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      credentials: "include",
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      return { ok: false, status: res.status };
+    }
+
+    const contentType = res.headers.get("content-type") || "";
+    const disp = res.headers.get("content-disposition") || "";
+    const dispositionFilename = parseContentDispositionFilename(disp);
+    const isAttachment = /\battachment\b/i.test(disp);
+
+    return {
+      ok: true,
+      status: res.status,
+      finalUrl: res.url || url,
+      contentType,
+      dispositionFilename,
+      isAttachment
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function fetchRawText(url, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      credentials: "include",
+      signal: controller.signal
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function formatTextAsMarkdown({ url, title, rawText, ext, mime, timestampUtc }) {
+  const frontmatter = [
+    "---",
+    `URL: ${url}`,
+    `Retrieved-Timestamp: ${timestampUtc}`,
+    "---",
+    ""
+  ].join("\n");
+
+  let body = (rawText || "").replace(/\r\n/g, "\n").trim();
+
+  if (
+    MD_EXTENSIONS.has(ext) ||
+    mime === "text/markdown" ||
+    mime === "text/x-markdown"
+  ) {
+    // Strip existing top YAML frontmatter if present so CleanRead frontmatter isn't duplicated
+    if (body.startsWith("---\n")) {
+      const endIdx = body.indexOf("\n---\n", 4);
+      if (endIdx !== -1) {
+        body = body.slice(endIdx + 5).trim();
+      }
+    }
+    return `${frontmatter}\n${body}\n`;
+  }
+
+  const codeLangMap = {
+    json: "json",
+    jsonl: "json",
+    xml: "xml",
+    svg: "xml",
+    yaml: "yaml",
+    yml: "yaml",
+    csv: "csv",
+    tsv: "tsv",
+    css: "css",
+    js: "javascript",
+    ts: "typescript",
+    py: "python",
+    sh: "bash",
+    sql: "sql",
+    toml: "toml",
+    ini: "ini"
+  };
+
+  const heading = title ? `# ${title}\n\n` : "";
+  const lang = codeLangMap[ext];
+  if (lang) {
+    return `${frontmatter}\n${heading}\`\`\`${lang}\n${body}\n\`\`\`\n`;
+  }
+
+  return `${frontmatter}\n${heading}${body}\n`;
+}
+
+function getRawTextExtension(ext) {
+  // Avoid filename collision with the generated CleanRead *.md file
+  if (MD_EXTENSIONS.has(ext)) {
+    return `raw.${ext}`;
+  }
+  return ext || "txt";
+}
+
+async function saveTextOrMarkdownFile({
+  url,
+  title,
+  rawText,
+  ext,
+  mime,
+  subfolder,
+  dispositionFilename = ""
+}) {
+  const timestampUtc = new Date().toISOString();
+  const basePath = buildBaseFilePath(subfolder, title, url, dispositionFilename);
+  const mdFilename = `${basePath}.md`;
+  const rawExt = getRawTextExtension(ext);
+  const rawFilename = `${basePath}.${rawExt}`;
+
+  const mdContent = formatTextAsMarkdown({
+    url,
+    title: stripKnownExtension(title || dispositionFilename),
+    rawText,
+    ext,
+    mime,
+    timestampUtc
+  });
+
+  await downloadFile(mdContent, mdFilename, "text/markdown");
+
+  try {
+    await downloadFromUrl(url, rawFilename);
+  } catch (_) {
+    await downloadFile(rawText, rawFilename, mime || "text/plain");
+  }
+
+  return {
+    title: title || dispositionFilename || url,
+    savedSummary: `${mdFilename} & ${rawFilename}`,
+    md: mdFilename,
+    raw: rawFilename
+  };
+}
+
+async function saveBinaryRawFile({
+  url,
+  title,
+  ext,
+  subfolder,
+  dispositionFilename = ""
+}) {
+  const basePath = buildBaseFilePath(subfolder, title, url, dispositionFilename);
+  const rawFilename = `${basePath}.${ext || "bin"}`;
+
+  await downloadFromUrl(url, rawFilename);
+
+  return {
+    title: title || dispositionFilename || url,
+    savedSummary: rawFilename,
+    raw: rawFilename
+  };
+}
+
+async function extractHtmlPageFromTab(tabId, url, subfolder, ext = "html") {
+  const timestampUtc = new Date().toISOString();
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["Readability.js"]
+  });
+
+  const injectionResults = await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["extractor.js"]
+  });
+
+  const payload =
+    injectionResults && injectionResults[0] && injectionResults[0].result
+      ? injectionResults[0].result
+      : null;
+
+  if (!payload || !payload.markdownBody) {
+    throw new Error(
+      (payload && payload.error) || "No readable text found on page"
+    );
+  }
+
+  const frontmatter = [
+    "---",
+    `URL: ${url}`,
+    `Retrieved-Timestamp: ${timestampUtc}`,
+    "---",
+    ""
+  ].join("\n");
+
+  const finalMarkdown = `${frontmatter}\n${payload.markdownBody.trim()}\n`;
+  const basePath = buildBaseFilePath(subfolder, payload.title, url);
+  const mdFilename = `${basePath}.md`;
+  const rawFilename = `${basePath}.${ext === "htm" ? "htm" : "html"}`;
+
+  await downloadFile(finalMarkdown, mdFilename, "text/markdown");
+  if (payload.rawHtml) {
+    await downloadFile(payload.rawHtml, rawFilename, "text/html");
+  }
+
+  return {
+    title: payload.title,
+    savedSummary: `${mdFilename} & ${rawFilename}`,
+    md: mdFilename,
+    raw: rawFilename
+  };
+}
+
+async function probeLoadedTab(tabId) {
+  try {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => ({
+        contentType: document.contentType || "",
+        title: document.title || "",
+        bodyText: document.body ? document.body.innerText : "",
+        hasPdfEmbed: Boolean(document.querySelector('embed[type="application/pdf"]'))
+      })
+    });
+    return res && res[0] && res[0].result ? res[0].result : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 /**
@@ -219,7 +651,6 @@ function simulateHumanActivity(durationMs) {
       curX = targetX;
       curY = targetY;
 
-      // Realistic human-like scrolling (downwards, occasionally slight back up)
       if (Math.random() < 0.4) {
         const scrollDelta = (Math.random() < 0.7 ? 1 : -1) * Math.floor(80 + Math.random() * 160);
         window.scrollBy({ top: scrollDelta, behavior: "smooth" });
@@ -240,6 +671,48 @@ async function processSingleUrl(
   minWait = 7,
   maxWait = 21
 ) {
+  // Fast pre-flight check via HEAD so direct binary downloads (PDFs, zips, images)
+  // and plain text/md files save directly without fighting Chrome's viewer or attachment behavior.
+  const headInfo = await probeRemoteHeaders(url);
+  if (headInfo && headInfo.ok) {
+    const info = classifyResource(
+      headInfo.finalUrl || url,
+      headInfo.contentType,
+      headInfo.dispositionFilename
+    );
+
+    if (info.kind === "binary" || (headInfo.isAttachment && info.kind !== "text")) {
+      const result = await saveBinaryRawFile({
+        url: headInfo.finalUrl || url,
+        title: "",
+        ext: info.ext,
+        subfolder,
+        dispositionFilename: headInfo.dispositionFilename
+      });
+      addLog(`Saved raw file: ${result.savedSummary}`, "success");
+      return true;
+    }
+
+    if (info.kind === "text") {
+      try {
+        const rawText = await fetchRawText(headInfo.finalUrl || url);
+        const result = await saveTextOrMarkdownFile({
+          url: headInfo.finalUrl || url,
+          title: "",
+          rawText,
+          ext: info.ext,
+          mime: info.mime,
+          subfolder,
+          dispositionFilename: headInfo.dispositionFilename
+        });
+        addLog(`Saved text + MD: ${result.savedSummary}`, "success");
+        return true;
+      } catch (_) {
+        // Fall through to tab-based handling if fetch failed
+      }
+    }
+  }
+
   let tabId = null;
   try {
     const tab = await chrome.tabs.create({ url, active: isSingleWorker });
@@ -265,57 +738,129 @@ async function processSingleUrl(
       await sleep(waitMs);
     }
 
-    const timestampUtc = new Date().toISOString();
+    let currentTab = null;
+    try {
+      currentTab = await chrome.tabs.get(tabId);
+    } catch (_) {}
+    const effectiveUrl = (currentTab && currentTab.url) || url;
 
-    // Inject Mozilla Readability.js first
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["Readability.js"]
-    });
-
-    // Inject our CleanRead extractor and capture its return value
-    const injectionResults = await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["extractor.js"]
-    });
-
-    const payload =
-      injectionResults && injectionResults[0] && injectionResults[0].result
-        ? injectionResults[0].result
-        : null;
-
-    if (!payload || !payload.markdownBody) {
-      throw new Error(
-        (payload && payload.error) || "No readable text found on page"
-      );
+    const probed = await probeLoadedTab(tabId);
+    let info = classifyResource(effectiveUrl, probed ? probed.contentType : "", "");
+    if (probed && probed.hasPdfEmbed) {
+      info = { kind: "binary", ext: "pdf", mime: "application/pdf" };
     }
 
-    const frontmatter = [
-      "---",
-      `URL: ${url}`,
-      `Retrieved-Timestamp: ${timestampUtc}`,
-      "---",
-      ""
-    ].join("\n");
-
-    const finalMarkdown = `${frontmatter}\n${payload.markdownBody.trim()}\n`;
-    const filenames = buildFilenames(subfolder, payload.title, url);
-
-    await downloadFile(finalMarkdown, filenames.md, "text/markdown");
-    if (payload.rawHtml) {
-      await downloadFile(payload.rawHtml, filenames.html, "text/html");
+    if (info.kind === "binary") {
+      const result = await saveBinaryRawFile({
+        url: effectiveUrl,
+        title: probed ? probed.title : "",
+        ext: info.ext,
+        subfolder
+      });
+      addLog(`Saved raw file: ${result.savedSummary}`, "success");
+      return true;
     }
-    addLog(`Saved: ${filenames.md} & ${filenames.html}`, "success");
+
+    if (info.kind === "text") {
+      let rawText = probed ? probed.bodyText : "";
+      try {
+        rawText = await fetchRawText(effectiveUrl);
+      } catch (_) {}
+      const result = await saveTextOrMarkdownFile({
+        url: effectiveUrl,
+        title: probed ? probed.title : "",
+        rawText,
+        ext: info.ext,
+        mime: info.mime,
+        subfolder
+      });
+      addLog(`Saved text + MD: ${result.savedSummary}`, "success");
+      return true;
+    }
+
+    const result = await extractHtmlPageFromTab(tabId, effectiveUrl, subfolder, info.ext);
+    addLog(`Saved: ${result.savedSummary}`, "success");
     return true;
   } finally {
     if (tabId !== null) {
       try {
         await chrome.tabs.remove(tabId);
-      } catch (_) {
-        // Tab may already have been closed by user
-      }
+      } catch (_) {}
     }
   }
+}
+
+async function processCurrentTab(tabId, url, title, subfolder) {
+  const probed = await probeLoadedTab(tabId);
+  let headerInfo = null;
+
+  // If executeScript couldn't read the tab (e.g. restricted PDF viewer) or contentType was empty,
+  // check HTTP headers as well.
+  if (!probed || !probed.contentType) {
+    headerInfo = await probeRemoteHeaders(url);
+  }
+
+  const effectiveContentType =
+    (probed && probed.contentType) ||
+    (headerInfo && headerInfo.contentType) ||
+    "";
+  const dispName = (headerInfo && headerInfo.dispositionFilename) || "";
+  const effectiveTitle = (probed && probed.title) || title || "";
+
+  let info = classifyResource(url, effectiveContentType, dispName);
+  if (probed && probed.hasPdfEmbed) {
+    info = { kind: "binary", ext: "pdf", mime: "application/pdf" };
+  }
+
+  if (info.kind === "binary") {
+    const result = await saveBinaryRawFile({
+      url,
+      title: effectiveTitle,
+      ext: info.ext,
+      subfolder,
+      dispositionFilename: dispName
+    });
+    addLog(`Saved current file: ${result.savedSummary}`, "success");
+    return {
+      ok: true,
+      title: result.title,
+      filename: result.savedSummary,
+      kind: "binary"
+    };
+  }
+
+  if (info.kind === "text") {
+    let rawText = (probed && probed.bodyText) || "";
+    try {
+      rawText = await fetchRawText(url);
+    } catch (_) {}
+
+    const result = await saveTextOrMarkdownFile({
+      url,
+      title: effectiveTitle,
+      rawText,
+      ext: info.ext,
+      mime: info.mime,
+      subfolder,
+      dispositionFilename: dispName
+    });
+    addLog(`Saved current text + MD: ${result.savedSummary}`, "success");
+    return {
+      ok: true,
+      title: result.title,
+      filename: result.savedSummary,
+      kind: "text"
+    };
+  }
+
+  const result = await extractHtmlPageFromTab(tabId, url, subfolder, info.ext);
+  addLog(`Saved current page: ${result.savedSummary}`, "success");
+  return {
+    ok: true,
+    title: result.title,
+    filename: result.savedSummary,
+    kind: "html"
+  };
 }
 
 async function runBatchQueue(
@@ -355,7 +900,7 @@ async function runBatchQueue(
       const rawUrl = urls[i];
 
       jobState.currentUrl = rawUrl;
-      addLog(`[Worker ${workerId}] Opening (${i + 1}/${urls.length}): ${rawUrl}`);
+      addLog(`[Worker ${workerId}] Processing (${i + 1}/${urls.length}): ${rawUrl}`);
       broadcastState();
 
       try {
@@ -396,58 +941,6 @@ async function runBatchQueue(
   broadcastState();
 }
 
-async function processCurrentTab(tabId, url, subfolder) {
-  const timestampUtc = new Date().toISOString();
-
-  // Inject Mozilla Readability.js first
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ["Readability.js"]
-  });
-
-  // Inject CleanRead extractor and capture payload
-  const injectionResults = await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ["extractor.js"]
-  });
-
-  const payload =
-    injectionResults && injectionResults[0] && injectionResults[0].result
-      ? injectionResults[0].result
-      : null;
-
-  if (!payload || !payload.markdownBody) {
-    throw new Error(
-      (payload && payload.error) || "No readable content found on page"
-    );
-  }
-
-  const frontmatter = [
-    "---",
-    `URL: ${url}`,
-    `Retrieved-Timestamp: ${timestampUtc}`,
-    "---",
-    ""
-  ].join("\n");
-
-  const finalMarkdown = `${frontmatter}\n${payload.markdownBody.trim()}\n`;
-  const filenames = buildFilenames(subfolder, payload.title, url);
-
-  await downloadFile(finalMarkdown, filenames.md, "text/markdown");
-  if (payload.rawHtml) {
-    await downloadFile(payload.rawHtml, filenames.html, "text/html");
-  }
-
-  addLog(`Saved current page: ${filenames.md} & ${filenames.html}`, "success");
-  return {
-    ok: true,
-    title: payload.title,
-    filename: `${filenames.md} & ${filenames.html}`,
-    md: filenames.md,
-    html: filenames.html
-  };
-}
-
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || !message.type) return;
 
@@ -459,6 +952,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "SAVE_CURRENT_TAB") {
     const tabId = message.tabId;
     const url = message.url;
+    const title = message.title || "";
     const subfolder = message.subfolder || "CleanRead";
 
     if (!tabId || !url) {
@@ -466,7 +960,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     }
 
-    processCurrentTab(tabId, url, subfolder)
+    processCurrentTab(tabId, url, title, subfolder)
       .then((res) => sendResponse(res))
       .catch((err) =>
         sendResponse({

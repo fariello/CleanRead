@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "CleanRead",
-  "version": "1.0.1",
-  "description": "Opens a pasted list of URLs or converts the current active webpage, saving screen-reader-friendly, text-only Markdown with URL & UTC Timestamp frontmatter.",
+  "version": "1.0.2",
+  "description": "Converts web pages, text, and Markdown files into screen-reader-friendly Markdown and downloads raw files (including PDFs, docs, HTML, and binaries).",
   "permissions": [
     "activeTab",
     "tabs",
@@ -17,7 +17,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "CleanRead — Text-to-Markdown Saver",
+    "default_title": "CleanRead — Text-to-Markdown & File Saver",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icon16.png",
