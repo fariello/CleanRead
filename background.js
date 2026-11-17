@@ -69,6 +69,8 @@ const MIME_TO_EXT = {
   "video/webm": "webm"
 };
 
+let currentBatchFullLogs = [];
+
 let jobState = {
   isRunning: false,
   cancelRequested: false,
@@ -81,11 +83,15 @@ let jobState = {
 };
 
 function addLog(message, type = "info") {
+  const now = new Date();
   const entry = {
-    time: new Date().toISOString().slice(11, 19),
+    time: now.toISOString().slice(11, 19),
     message,
     type
   };
+  currentBatchFullLogs.push(
+    `[${getLocalIsoTimestamp(now)}] [${String(type).toUpperCase()}] ${message}`
+  );
   jobState.logs.push(entry);
   if (jobState.logs.length > 100) {
     jobState.logs.shift();
@@ -970,6 +976,7 @@ async function runBatchQueue(
   const high = Math.max(low, Number(maxWait) || 21);
   const startedAt = new Date();
 
+  currentBatchFullLogs = [];
   jobState = {
     isRunning: true,
     cancelRequested: false,
@@ -1062,7 +1069,9 @@ async function runBatchQueue(
   }
 
   const completedAt = new Date();
-  const reportFilename = `${jobState.subfolder}/${getLocalDateTimePrefix(completedAt)}-cleanread-report.md`;
+  const dateTimePrefix = getLocalDateTimePrefix(completedAt);
+  const reportFilename = `${jobState.subfolder}/${dateTimePrefix}-cleanread-report.md`;
+  const logFilename = `${jobState.subfolder}/${dateTimePrefix}-cleanread.log`;
   const reportMarkdown = buildBatchReportMarkdown({
     subfolder: jobState.subfolder,
     startedAt,
@@ -1090,6 +1099,18 @@ async function runBatchQueue(
     `Finished! ${jobState.completed} saved, ${jobState.failed} failed.`,
     "info"
   );
+
+  try {
+    const logContent = currentBatchFullLogs.join("\n") + "\n";
+    await downloadFile(logContent, logFilename, "text/plain");
+    addLog(`Log saved: ${logFilename}`, "success");
+  } catch (err) {
+    addLog(
+      `Failed to save log: ${err && err.message ? err.message : String(err)}`,
+      "error"
+    );
+  }
+
   broadcastState();
 }
 

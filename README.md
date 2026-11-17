@@ -1,8 +1,12 @@
-# CleanRead (v1.0.3)
+# CleanRead (v1.0.4)
 
 A lightweight MS Edge / Google Chrome extension (Manifest V3) that converts web pages, plain text, and Markdown files into screen-reader-friendly Markdown (`*.md`) and saves the raw file (`*.html`, `*.txt`, `*.pdf`, `*.docx`, images, archives, etc.) into your Downloads folder.
 
-## New in v1.0.3
+## New in v1.0.4
+
+- **Full Batch Log File (`YYYYMMDD-hhmmss-cleanread.log`)**: Every batch run now also writes the complete, untruncated timestamped execution log directly into `Downloads/<Subfolder>/` alongside the Markdown report.
+
+## v1.0.3 Features
 
 - **Batch Summary Report (`YYYYMMDD-hhmmss-cleanread-report.md`)**: Every batch run writes a timestamped report directly into `Downloads/<Subfolder>/` detailing run timestamps, settings, counts, per-URL status/files/errors, and two clean copy-pasteable sections at the end (`## Successful URLS` and `## Unsuccessful URLs`, one bare URL per line).
 
@@ -46,5 +50,5 @@ Clean, structured Markdown text without images, raw inline URLs, navbars, or foo
 2. Enable **Developer mode**.
 3. If previously loaded, click the **Reload** (circular arrow) icon on the **CleanRead** card.
    - If loading for the first time, click **Load unpacked** and select the `CleanRead` folder.
-4. Open the popup to verify **`v1.0.3`** in the header.
+4. Open the popup to verify **`v1.0.4`** in the header.
 5. *(Recommended)* In browser download settings (`edge://settings/downloads` or `chrome://settings/downloads`), turn **off** *"Ask where to save each file before downloading"* so downloads save automatically without prompting for each file.
