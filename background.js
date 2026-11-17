@@ -1169,7 +1169,120 @@ async function processSingleUrl(
   }
 }
 
+const readmeCreationPromises = new Map();
+
+function folderAlreadyHasReadme(subfolder) {
+  const normalizedFolder = sanitizeSubfolder(subfolder).toLowerCase();
+  const targetSuffix = `/${normalizedFolder}/readme.md`;
+  return new Promise((resolve) => {
+    chrome.downloads.search({ exists: true }, (items) => {
+      if (chrome.runtime.lastError || !Array.isArray(items)) {
+        resolve(false);
+        return;
+      }
+      const found = items.some((item) => {
+        if (!item.filename || item.state !== "complete") return false;
+        const normPath = item.filename.replace(/\\/g, "/").toLowerCase();
+        return normPath.endsWith(targetSuffix);
+      });
+      resolve(found);
+    });
+  });
+}
+
+function buildDirectoryReadmeMarkdown(subfolder) {
+  const manifest = chrome.runtime.getManifest ? chrome.runtime.getManifest() : {};
+  const extName = manifest.name || "CleanRead";
+  const extVersion = manifest.version || "1.0.6";
+  const cleanFolder = sanitizeSubfolder(subfolder);
+
+  return `# ${extName} Output Directory (\`Downloads/${cleanFolder}/\`)
+
+This directory contains web pages, text documents, raw files, metadata sidecars, and batch reports archived by **${extName} v${extVersion}** (a Chrome/Edge Manifest V3 browser extension).
+
+## What ${extName} Does
+
+- **Webpages & Text Resources** (\`.html\`, \`.htm\`, \`.txt\`, \`.md\`, \`.json\`, \`.xml\`, \`.csv\`, \`.yaml\`, \`.rst\`, \`.log\`):
+  - Strips navigation bars, ads, sidebars, headers, footers, and pop-ups (using Mozilla \`Readability.js\` + semantic DOM normalization) to generate clean, screen-reader-friendly Markdown (\`YYYYMMDD-<slug>.md\`).
+  - Downloads the untouched raw source (post-JS rendered \`.html\` for webpages, or the original raw file for text/data URLs).
+- **Binary / Non-Text Files** (\`.pdf\`, \`.docx\`, \`.xlsx\`, \`.pptx\`, \`.zip\`, images, audio, video):
+  - Downloads the original binary file directly (\`YYYYMMDD-<slug>.<ext>\`) without generating a \`.md\` file.
+- **Metadata & Batch Audits**:
+  - Writes a per-URL \`.json\` sidecar for every fetched URL, plus a timestamped Markdown report and complete execution log after each batch run.
+
+---
+
+## File Types in This Directory
+
+All per-URL artifacts share the same local date prefix and slug: \`YYYYMMDD-<slug>\`.
+
+1. **\`YYYYMMDD-<slug>.md\`** — Clean, readable Markdown extracted from HTML webpages or formatted from text/Markdown URLs. Always starts with YAML frontmatter:
+   - \`URL\`: Original URL
+   - \`Retrieved-Timestamp\`: UTC ISO-8601 retrieval timestamp
+
+2. **\`YYYYMMDD-<slug>.json\`** — Structured metadata sidecar written for **every** fetched URL (webpages, text files, and binaries alike):
+   - \`description\`: Explains what the JSON file and its companion files contain.
+   - \`extension\`: Name, version, manifest version, description, and ID of the ${extName} extension build that created it.
+   - \`fetchedAt\`: UTC timestamp, local ISO timestamp, Unix epoch ms, and processing duration.
+   - \`url\`: \`requested\`, \`final\` (after redirects), parsed URL components, and \`referrer\`.
+   - \`resource\`: \`kind\` (\`"html"\` | \`"text"\` | \`"binary"\`), \`title\`, \`fileExtension\`, \`mimeType\`, \`characterSet\`, \`lastModified\`, and \`fileSizeBytes\`.
+   - \`http\`: HTTP status code, protocol, transfer/body byte sizes, and full \`responseHeaders\`.
+   - \`files\`: Filenames **relative to this directory** (no full disk paths):
+     - \`markdown\`: Companion \`.md\` filename (or \`null\` for binary files like PDFs)
+     - \`raw\`: Companion raw filename (\`.html\`, \`.txt\`, \`.raw.md\`, \`.pdf\`, etc.)
+     - \`metadata\`: This \`.json\` filename
+     - \`allSavedFiles\`: Array of all filenames saved in this directory for that URL
+
+3. **Raw Companion Files**
+   - \`YYYYMMDD-<slug>.html\` / \`.htm\` — Post-JS rendered HTML DOM snapshot for webpages.
+   - \`YYYYMMDD-<slug>.<ext>\` — Original raw text/data file (\`.txt\`, \`.json\`, \`.csv\`, \`.xml\`) or binary file (\`.pdf\`, \`.docx\`, \`.zip\`, \`.png\`, etc.).
+   - \`YYYYMMDD-<slug>.raw.md\` — Original raw Markdown file when the fetched URL itself was already Markdown (distinguishing it from ${extName}'s frontmattered \`.md\`).
+
+4. **\`YYYYMMDD-hhmmss-cleanread-report.md\`** — Batch run summary report containing timestamps, settings, per-URL status/errors/saved files, and two plain URL lists at the bottom (\`## Successful URLS\` and \`## Unsuccessful URLs\`, one bare URL per line for copy-paste/retry).
+
+5. **\`YYYYMMDD-hhmmss-cleanread.log\`** — Full, untruncated timestamped execution log for a batch run.
+
+---
+
+## How an Agent Should Read & Use These Files
+
+1. **Discover & Index**: Start by reading the latest \`*-cleanread-report.md\` (for batch runs) or listing \`*.json\` sidecars. Each \`*.json\` file is self-describing and maps directly to its companion files via \`files.markdown\`, \`files.raw\`, and \`files.allSavedFiles\`.
+2. **Read Clean Text**: Read \`YYYYMMDD-<slug>.md\` for clean article content without HTML boilerplate or ads. Inspect its top frontmatter for source \`URL\` and \`Retrieved-Timestamp\`.
+3. **Inspect Raw Originals When Needed**: Open \`files.raw\` only when you need exact original HTML markup, structured data, or non-text binary files such as PDFs, Office documents, or images.
+4. **Troubleshoot**: If a URL appears under \`## Unsuccessful URLs\` in a report, check the corresponding \`*-cleanread.log\` for detailed worker timings and error messages.
+`;
+}
+
+async function ensureDirectoryReadme(subfolder) {
+  const cleanFolder = sanitizeSubfolder(subfolder);
+  const key = cleanFolder.toLowerCase();
+  if (readmeCreationPromises.has(key)) {
+    return readmeCreationPromises.get(key);
+  }
+
+  const task = (async () => {
+    try {
+      const exists = await folderAlreadyHasReadme(cleanFolder);
+      if (exists) return false;
+
+      const readmeFilename = `${cleanFolder}/README.md`;
+      const content = buildDirectoryReadmeMarkdown(cleanFolder);
+      await downloadFile(content, readmeFilename, "text/markdown");
+      addLog(`Created directory guide: ${readmeFilename}`, "info");
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      readmeCreationPromises.delete(key);
+    }
+  })();
+
+  readmeCreationPromises.set(key, task);
+  return task;
+}
+
 async function processCurrentTab(tabId, url, title, subfolder) {
+  await ensureDirectoryReadme(subfolder);
   const startedMs = Date.now();
   const probed = await probeLoadedTab(tabId);
   const headerInfo = await probeRemoteHeaders(url, 3000);
@@ -1390,6 +1503,7 @@ async function runBatchQueue(
   addLog(
     `Starting batch of ${urls.length} URL(s) with ${maxWorkers} tab worker(s), ${low}-${high}s wait -> Downloads/${jobState.subfolder}/`
   );
+  await ensureDirectoryReadme(jobState.subfolder);
 
   let nextIndex = 0;
   const outcomes = new Array(urls.length);
