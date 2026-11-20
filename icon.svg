@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="gIndigo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#3730a3"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#gIndigo)" stroke="#818cf8" stroke-opacity="0.45" stroke-width="2.5"/>
+  <!-- Boxy violet-cyan Broom Bot -->
+  <rect x="28" y="28" width="60" height="52" rx="14" fill="#312e81" stroke="#38bdf8" stroke-width="3.5"/>
+  <circle cx="46" cy="48" r="8" fill="#ffffff"/><circle cx="47" cy="49" r="3.5" fill="#0f172a"/>
+  <circle cx="70" cy="46" r="10" fill="#ffffff"/><circle cx="68" cy="45" r="4" fill="#0f172a"/>
+  <rect x="44" y="64" width="28" height="6" rx="3" fill="#4ade80"/>
+  <!-- Angled broom -->
+  <line x1="94" y1="24" x2="78" y2="80" stroke="#f59e0b" stroke-width="6" stroke-linecap="round"/>
+  <polygon points="64,78 90,82 94,104 54,98" fill="#fde047" stroke="#f59e0b" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>

@@ -1,10 +1,14 @@
-# CleanRead (v1.0.6)
+# TidyTexty (v1.0.7)
 
-A lightweight MS Edge / Google Chrome extension (Manifest V3) that converts web pages, plain text, and Markdown files into screen-reader-friendly Markdown (`*.md`) and saves the raw file (`*.html`, `*.txt`, `*.pdf`, `*.docx`, images, archives, etc.) plus a rich per-URL `*.json` metadata sidecar into your Downloads folder.
+A lightweight MS Edge / Google Chrome extension (Manifest V3) that converts web pages, plain text, and Markdown files into screen-reader-friendly Markdown (`*.md`) and saves the raw file (`*.html`, `*.txt`, `*.pdf`, `*.docx`, images, archives, etc.) plus a rich per-URL `*.json` metadata sidecar into your Downloads folder. Designed as the companion extension to **SerpyDerpy**.
 
-## New in v1.0.6
+## New in v1.0.7
 
-- **Agent-Friendly Output Directory `README.md`**: Automatically creates a `README.md` inside `Downloads/<Subfolder>/` (if one does not already exist) explaining CleanRead, the naming conventions, JSON metadata fields, and how an AI agent or reader should interpret and traverse all saved files in the directory.
+- **Renamed to TidyTexty**: Evolved from `CleanRead` to **TidyTexty** (`Downloads/TidyTexty/`, `*-tidytexty-report.md`, `*-tidytexty.log`), featuring the custom **Broom Bot** vector icon (`icon.svg`, `icon16.png`, `icon48.png`, `icon128.png`).
+
+## v1.0.6 Features
+
+- **Agent-Friendly Output Directory `README.md`**: Automatically creates a `README.md` inside `Downloads/<Subfolder>/` (if one does not already exist) explaining TidyTexty, the naming conventions, JSON metadata fields, and how an AI agent or reader should interpret and traverse all saved files in the directory.
 
 ## v1.0.5 Features
 
@@ -17,11 +21,11 @@ A lightweight MS Edge / Google Chrome extension (Manifest V3) that converts web 
 
 ## v1.0.4 Features
 
-- **Full Batch Log File (`YYYYMMDD-hhmmss-cleanread.log`)**: Every batch run now also writes the complete, untruncated timestamped execution log directly into `Downloads/<Subfolder>/` alongside the Markdown report.
+- **Full Batch Log File (`YYYYMMDD-hhmmss-tidytexty.log`)**: Every batch run now also writes the complete, untruncated timestamped execution log directly into `Downloads/<Subfolder>/` alongside the Markdown report.
 
 ## v1.0.3 Features
 
-- **Batch Summary Report (`YYYYMMDD-hhmmss-cleanread-report.md`)**: Every batch run writes a timestamped report directly into `Downloads/<Subfolder>/` detailing run timestamps, settings, counts, per-URL status/files/errors, and two clean copy-pasteable sections at the end (`## Successful URLS` and `## Unsuccessful URLs`, one bare URL per line).
+- **Batch Summary Report (`YYYYMMDD-hhmmss-tidytexty-report.md`)**: Every batch run writes a timestamped report directly into `Downloads/<Subfolder>/` detailing run timestamps, settings, counts, per-URL status/files/errors, and two clean copy-pasteable sections at the end (`## Successful URLS` and `## Unsuccessful URLs`, one bare URL per line).
 
 ## v1.0.2 Features
 
@@ -40,10 +44,10 @@ A lightweight MS Edge / Google Chrome extension (Manifest V3) that converts web 
 
 ## Output Format
 
-Each URL or active tab is saved to `Downloads/<Subfolder>/` (default `Downloads/CleanRead/`) using your computer's local `YYYYMMDD` date:
+Each URL or active tab is saved to `Downloads/<Subfolder>/` (default `Downloads/TidyTexty/`) using your computer's local `YYYYMMDD` date:
 - **HTML / Webpage**: `YYYYMMDD-<slug>.md` + rendered `YYYYMMDD-<slug>.html`
 - **Plain Text / Structured Text**: `YYYYMMDD-<slug>.md` + raw `YYYYMMDD-<slug>.txt` (or `.json`, `.csv`, `.xml`, etc.)
-- **Markdown**: `YYYYMMDD-<slug>.md` (with CleanRead frontmatter) + raw `YYYYMMDD-<slug>-raw.md`
+- **Markdown**: `YYYYMMDD-<slug>.md` (with TidyTexty frontmatter) + raw `YYYYMMDD-<slug>-raw.md`
 - **PDF & Other Binaries**: raw `YYYYMMDD-<slug>.pdf` (or `.docx`, `.zip`, `.png`, etc.)
 
 ```markdown
@@ -61,7 +65,7 @@ Clean, structured Markdown text without images, raw inline URLs, navbars, or foo
 
 1. Open `edge://extensions` (in Edge) or `chrome://extensions` (in Chrome).
 2. Enable **Developer mode**.
-3. If previously loaded, click the **Reload** (circular arrow) icon on the **CleanRead** card.
-   - If loading for the first time, click **Load unpacked** and select the `CleanRead` folder.
-4. Open the popup to verify **`v1.0.6`** in the header.
+3. If previously loaded, click the **Reload** (circular arrow) icon on the **TidyTexty** card.
+   - If loading for the first time, click **Load unpacked** and select the `TidyTexty` folder.
+4. Open the popup to verify **`v1.0.7`** in the header.
 5. *(Recommended)* In browser download settings (`edge://settings/downloads` or `chrome://settings/downloads`), turn **off** *"Ask where to save each file before downloading"* so downloads save automatically without prompting for each file.

@@ -1,5 +1,5 @@
 /**
- * CleanRead Content Extractor
+ * TidyTexty Content Extractor
  * Runs inside the target webpage after Readability.js is injected.
  * Extracts only the essential human-readable text and converts it to clean Markdown
  * (no images, no raw link URLs, no navbars/popups/footers).

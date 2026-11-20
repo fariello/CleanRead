@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "CleanRead",
-  "version": "1.0.6",
+  "name": "TidyTexty",
+  "version": "1.0.7",
   "description": "Converts web pages, text, and Markdown files into screen-reader-friendly Markdown and downloads raw files (including PDFs, docs, HTML, and binaries).",
   "permissions": [
     "activeTab",
@@ -17,7 +17,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "CleanRead — Text-to-Markdown & File Saver",
+    "default_title": "TidyTexty — Text-to-Markdown & File Saver",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icon16.png",

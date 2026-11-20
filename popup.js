@@ -120,32 +120,32 @@ function renderState(state) {
 // Load saved drafts and live state on popup open
 chrome.storage.local.get(
   [
-    "cleanReadSubfolder",
-    "cleanReadConcurrency",
-    "cleanReadMinWait",
-    "cleanReadMaxWait",
-    "cleanReadUrlsDraft",
-    "cleanReadJobState"
+    "tidyTextySubfolder",
+    "tidyTextyConcurrency",
+    "tidyTextyMinWait",
+    "tidyTextyMaxWait",
+    "tidyTextyUrlsDraft",
+    "tidyTextyJobState"
   ],
   (res) => {
-    if (res.cleanReadSubfolder) {
-      subfolderInput.value = res.cleanReadSubfolder;
-      folderPreview.textContent = res.cleanReadSubfolder;
+    if (res.tidyTextySubfolder) {
+      subfolderInput.value = res.tidyTextySubfolder;
+      folderPreview.textContent = res.tidyTextySubfolder;
     }
-    if (res.cleanReadConcurrency) {
-      concurrencySelect.value = res.cleanReadConcurrency;
+    if (res.tidyTextyConcurrency) {
+      concurrencySelect.value = res.tidyTextyConcurrency;
     }
-    if (res.cleanReadMinWait !== undefined && res.cleanReadMinWait !== null) {
-      minWaitInput.value = res.cleanReadMinWait;
+    if (res.tidyTextyMinWait !== undefined && res.tidyTextyMinWait !== null) {
+      minWaitInput.value = res.tidyTextyMinWait;
     }
-    if (res.cleanReadMaxWait !== undefined && res.cleanReadMaxWait !== null) {
-      maxWaitInput.value = res.cleanReadMaxWait;
+    if (res.tidyTextyMaxWait !== undefined && res.tidyTextyMaxWait !== null) {
+      maxWaitInput.value = res.tidyTextyMaxWait;
     }
-    if (res.cleanReadUrlsDraft) {
-      urlsInput.value = res.cleanReadUrlsDraft;
+    if (res.tidyTextyUrlsDraft) {
+      urlsInput.value = res.tidyTextyUrlsDraft;
     }
-    if (res.cleanReadJobState) {
-      renderState(res.cleanReadJobState);
+    if (res.tidyTextyJobState) {
+      renderState(res.tidyTextyJobState);
     }
   }
 );
@@ -163,31 +163,31 @@ chrome.runtime.onMessage.addListener((msg) => {
 });
 
 subfolderInput.addEventListener("input", () => {
-  const val = subfolderInput.value.trim() || "CleanRead";
+  const val = subfolderInput.value.trim() || "TidyTexty";
   folderPreview.textContent = val;
-  chrome.storage.local.set({ cleanReadSubfolder: val });
+  chrome.storage.local.set({ tidyTextySubfolder: val });
 });
 
 concurrencySelect.addEventListener("change", () => {
-  chrome.storage.local.set({ cleanReadConcurrency: concurrencySelect.value });
+  chrome.storage.local.set({ tidyTextyConcurrency: concurrencySelect.value });
 });
 
 minWaitInput.addEventListener("input", () => {
   const val = parseFloat(minWaitInput.value);
   if (!isNaN(val)) {
-    chrome.storage.local.set({ cleanReadMinWait: val });
+    chrome.storage.local.set({ tidyTextyMinWait: val });
   }
 });
 
 maxWaitInput.addEventListener("input", () => {
   const val = parseFloat(maxWaitInput.value);
   if (!isNaN(val)) {
-    chrome.storage.local.set({ cleanReadMaxWait: val });
+    chrome.storage.local.set({ tidyTextyMaxWait: val });
   }
 });
 
 urlsInput.addEventListener("input", () => {
-  chrome.storage.local.set({ cleanReadUrlsDraft: urlsInput.value });
+  chrome.storage.local.set({ tidyTextyUrlsDraft: urlsInput.value });
 });
 
 startBtn.addEventListener("click", () => {
@@ -197,7 +197,7 @@ startBtn.addEventListener("click", () => {
     return;
   }
 
-  const subfolder = subfolderInput.value.trim() || "CleanRead";
+  const subfolder = subfolderInput.value.trim() || "TidyTexty";
   const concurrency = parseInt(concurrencySelect.value, 10) || 3;
   let minWait = parseFloat(minWaitInput.value);
   let maxWait = parseFloat(maxWaitInput.value);
@@ -207,10 +207,10 @@ startBtn.addEventListener("click", () => {
   maxWaitInput.value = maxWait;
 
   chrome.storage.local.set({
-    cleanReadSubfolder: subfolder,
-    cleanReadConcurrency: String(concurrency),
-    cleanReadMinWait: minWait,
-    cleanReadMaxWait: maxWait
+    tidyTextySubfolder: subfolder,
+    tidyTextyConcurrency: String(concurrency),
+    tidyTextyMinWait: minWait,
+    tidyTextyMaxWait: maxWait
   });
 
   chrome.runtime.sendMessage(
@@ -257,7 +257,7 @@ if (saveCurrentBtn) {
       saveCurrentBtn.textContent = "Saving...";
       statusText.textContent = "Processing active tab...";
 
-      const subfolder = subfolderInput.value.trim() || "CleanRead";
+      const subfolder = subfolderInput.value.trim() || "TidyTexty";
 
       chrome.runtime.sendMessage(
         {
